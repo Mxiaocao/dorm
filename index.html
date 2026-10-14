@@ -31,6 +31,17 @@ th{color:#646a73;font-weight:500}
 <body>
 <h1>寝室卫生安排</h1>
 
+<div id="login" class="hide" style="position:fixed;inset:0;background:#f5f6f8;z-index:99;display:flex;align-items:center;justify-content:center">
+  <div class="card" style="width:300px">
+    <h2>寝室卫生安排</h2>
+    <p style="font-size:13px;color:#646a73;margin-bottom:10px">请输入寝室口令后使用</p>
+    <div class="row">
+      <input id="passInput" type="password" placeholder="口令" style="flex:1">
+      <button onclick="doLogin()">进入</button>
+    </div>
+  </div>
+</div>
+
 <div class="tabs" id="tabs">
   <button data-t="today" class="on">今日任务</button>
   <button data-t="task">任务管理</button>
@@ -38,6 +49,8 @@ th{color:#646a73;font-weight:500}
   <button data-t="member">成员管理</button>
   <button data-t="history">完成历史</button>
 </div>
+
+<p id="syncTip" style="font-size:13px;color:#646a73;margin-bottom:10px">本地模式：数据仅保存在本机浏览器。</p>
 
 <!-- 今日任务 -->
 <div id="v-today">
@@ -107,7 +120,7 @@ th{color:#646a73;font-weight:500}
     <h2>完成历史</h2>
     <div id="hisList"></div>
   </div>
-  <div class="card">
+  <div class="card" id="dataCard">
     <h2>数据备份</h2>
     <div class="row">
       <button class="ghost" onclick="exportData()">导出备份文件</button>
@@ -121,10 +134,69 @@ th{color:#646a73;font-weight:500}
 
 <script>
 var KEY='dorm_v1';
-var db=load();
+var MODE='local';            // local | server
+var PASS=sessionStorage.getItem('dorm_pass')||'';
+var db=init();
+
+// 本地模式读写
 function load(){try{return JSON.parse(localStorage.getItem(KEY))||init();}catch(e){return init();}}
+function save(){if(MODE==='local')localStorage.setItem(KEY,JSON.stringify(db));}
+
+// 启动：有后端则校验口令并拉云端数据，没有则纯本地
+function boot(){
+  fetch('/api/state',{headers:{'x-passcode':PASS}})
+    .then(function(r){
+      if(r.status===401)return showLogin();
+      if(!r.ok)throw new Error();
+      MODE='server';hideLogin();
+      return r.json().then(function(d){db=norm(d);initUI();});
+    })
+    .catch(function(){MODE='local';db=load();initUI();});
+}
+
+function norm(d){
+  return{members:d.members||[],tasks:d.tasks||[],rotates:d.rotates||[],done:d.done||{}};
+}
+function api(url,body){
+  return fetch(url,{method:'POST',headers:{'Content-Type':'application/json','x-passcode':PASS},
+    body:JSON.stringify(body||{})})
+    .then(function(r){return r.json().then(function(j){
+      if(!r.ok)throw new Error(j.error||'操作失败');return j;});});
+}
+function refresh(){
+  if(MODE!=='server')return Promise.resolve();
+  return fetch('/api/state',{headers:{'x-passcode':PASS}})
+    .then(function(r){return r.json();})
+    .then(function(d){db=norm(d);renderAll();});
+}
+function act(fn){
+  fn();
+  if(MODE==='server')return refresh();
+  save();renderAll();
+}
+function showLogin(){document.getElementById('login').classList.remove('hide');}
+function hideLogin(){document.getElementById('login').classList.add('hide');}
+function doLogin(){
+  PASS=document.getElementById('passInput').value;
+  sessionStorage.setItem('dorm_pass',PASS);
+  fetch('/api/login',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({passcode:PASS})})
+    .then(function(r){return r.json().then(function(j){if(!r.ok)throw new Error(j.error);return j;});})
+    .then(function(){hideLogin();boot();})
+    .catch(function(e){alert(e.message||'口令错误');});
+}
+
+function initUI(){
+  document.getElementById('tDate').value=todayStr();
+  document.getElementById('rStart').value=todayStr();
+  if(MODE==='server'){
+    document.getElementById('syncTip').textContent='已连接服务器，全寝室共享数据。';
+    document.getElementById('dataCard').classList.add('hide');
+  }
+  renderAll();
+}
+
 function init(){return{members:[],tasks:[],rotates:[],done:{}};}
-function save(){localStorage.setItem(KEY,JSON.stringify(db));}
 
 function todayStr(){var d=new Date();return d.getFullYear()+'-'+p(d.getMonth()+1)+'-'+p(d.getDate());}
 function p(n){return n<10?'0'+n:''+n;}
@@ -134,10 +206,14 @@ function fmt(s){return s.slice(5);}
 function addMember(){
   var n=document.getElementById('mName').value.trim();
   if(!n)return;
-  db.members.push({id:Date.now(),name:n});save();document.getElementById('mName').value='';renderAll();
+  document.getElementById('mName').value='';
+  if(MODE==='server')return api('/api/member',{name:n}).then(refresh).catch(er);
+  act(function(){db.members.push({id:Date.now(),name:n});});
 }
 function delMember(id){
-  db.members=db.members.filter(function(m){return m.id!==id;});save();renderAll();
+  if(!confirm('确定删除该成员？其任务会变成「未指定」。'))return;
+  if(MODE==='server')return api('/api/member/delete',{id:id}).then(refresh).catch(er);
+  act(function(){db.members=db.members.filter(function(m){return m.id!==id;});});
 }
 
 // 任务
@@ -146,13 +222,24 @@ function addTask(){
   var d=document.getElementById('tDate').value;
   var o=document.getElementById('tOwner').value;
   if(!n||!d)return alert('请填写任务名和日期');
-  db.tasks.push({id:Date.now(),name:n,date:d,owner:o?Number(o):0});save();
-  document.getElementById('tName').value='';renderAll();
+  document.getElementById('tName').value='';
+  if(MODE==='server')return api('/api/task',{name:n,date:d,owner:o?Number(o):0}).then(refresh).catch(er);
+  act(function(){db.tasks.push({id:Date.now(),name:n,date:d,owner:o?Number(o):0});});
 }
-function delTask(id){db.tasks=db.tasks.filter(function(t){return t.id!==id;});save();renderAll();}
+function delTask(id){
+  if(!confirm('确定删除该任务？'))return;
+  if(MODE==='server')return api('/api/task/delete',{id:id}).then(refresh).catch(er);
+  act(function(){
+    db.tasks=db.tasks.filter(function(t){return t.id!==id;});
+    delete db.done[id];
+  });
+}
 function toggleDone(key){
-  db.done[key]?delete db.done[key]:(db.done[key]=todayStr());save();renderAll();
+  var date=db.done[key]?'':todayStr();
+  if(MODE==='server')return api('/api/done',{taskId:key,date:date}).then(refresh).catch(er);
+  act(function(){ date?(db.done[key]=date):(delete db.done[key]); });
 }
+function er(e){alert(e.message||'操作失败');}
 function isDone(t){return !!db.done[t.id];}
 function mname(id){var m=db.members.filter(function(x){return x.id===id;})[0];return m?m.name:'未指定';}
 
@@ -162,7 +249,8 @@ function addRotate(){
   var start=document.getElementById('rStart').value;
   var skip=document.getElementById('rSkip').checked;
   if(!tid||!start)return alert('请选择任务和开始日期');
-  db.rotates.push({id:Date.now(),taskId:tid,start:start,skipWeekend:skip});save();renderAll();
+  if(MODE==='server')return api('/api/rotate',{taskId:tid,start:start,skipWeekend:skip}).then(refresh).catch(er);
+  act(function(){db.rotates.push({id:Date.now(),taskId:tid,start:start,skipWeekend:skip});});
 }
 function rotateList(r){
   var out=[],mem=db.members;
@@ -265,7 +353,7 @@ function importData(input){
       if(!d||!Array.isArray(d.members)||!Array.isArray(d.tasks))throw new Error('格式不对');
       if(!confirm('导入将覆盖当前全部数据，确定继续？'))return;
       db={members:d.members,tasks:d.tasks,rotates:d.rotates||[],done:d.done||{}};
-      save();renderAll();alert('导入成功');
+      act(function(){});alert('导入成功');
     }catch(e){alert('导入失败：文件格式不正确');}
     input.value='';
   };
@@ -273,7 +361,8 @@ function importData(input){
 }
 function resetData(){
   if(!confirm('确定清空全部成员、任务、排班和完成记录？此操作不可撤销。'))return;
-  db=init();save();renderAll();
+  if(MODE==='server')return api('/api/reset',{}).then(refresh).catch(er);
+  db=init();act(function(){});
 }
 
 // tabs
@@ -286,10 +375,7 @@ document.querySelectorAll('#tabs button').forEach(function(b){
   };
 });
 
-if(!localStorage.getItem(KEY))save();
-document.getElementById('tDate').value=todayStr();
-document.getElementById('rStart').value=todayStr();
-renderAll();
+boot();
 </script>
 </body>
 </html>
