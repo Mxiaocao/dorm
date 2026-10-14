@@ -17,16 +17,23 @@
 
 服务器模式下自动隐藏「数据备份」卡（服务端数据本身即备份）。
 
-## 部署
+## 部署（Zeabur）
 
-```
-目录：/var/www/dorm     端口：8099     服务名：dorm（systemd）
-```
+仓库：`https://github.com/Mxiaocao/dorm`，分支 `master`。Dockerfile 为 `node:22-alpine`，零依赖。
 
-- 上传代码 → `bash deploy.sh`（装 Node、建 systemd、放行端口）
-- 口令用环境变量 `PASSCODE` 配置，默认 `dorm2026`，**上线前必须改**
-- 改口令：编辑 `/etc/systemd/system/dorm.service` 的 `PASSCODE`，再 `systemctl daemon-reload && systemctl restart dorm`
-- 有域名可再套 `deploy.nginx.conf` + certbot 上 https
+**必须配的环境变量：**
+
+- `PASSCODE` — 寝室口令。**不设就拒绝启动**（防止带弱口令上线）
+- `PORT` — 平台自动注入，一般是 8080
+- `DATA_DIR` — Dockerfile 已设 `/data`
+
+**必须挂 Volume**：挂到 `/data`，Volume ID 随意如 `data`。不挂的话每次重新部署 `data.json` 会被清空。
+
+部署顺序：**先建服务 → 再挂卷 → 重启**。反了会把卷挂到博客服务上。
+
+## 部署（自建 VPS，已废弃）
+
+原方案（systemd + deploy.sh + Nginx）已删除，改用 Zeabur。`deploy.sh`、`deploy.nginx.conf` 不再存在于仓库。
 
 ## 接口
 
@@ -38,6 +45,7 @@
 | POST | `/api/task` · `/api/task/delete` | 任务增删（删任务同步清完成记录） |
 | POST | `/api/done` | 标记/撤销完成 |
 | POST | `/api/rotate` · `/api/rotate/delete` | 排班增删 |
+| POST | `/api/rotate/generate` | **把排班写成真实任务**（按 name+date 去重，重复调用返回 0） |
 | POST | `/api/reset` | 清空全部 |
 
 除 `/api/login` 外均需请求头 `x-passcode`。
@@ -65,9 +73,11 @@
 - [x] 轮换支持「跳过周末」
 - [x] 本地模式导出导入备份
 - [x] Node 后端 + 口令登录 + 全寝室共享数据
-- [x] systemd 部署脚本 + Nginx 示例
-- [ ] 待定：按人查看「我今天该干什么」视角
+- [x] Zeabur 部署（Dockerfile + package.json + DATA_DIR 支持卷）
+- [x] **我的任务**页：选「我是谁」，只显示自己的活 + 未来 7 天
+- [x] **排班生成任务**：一键把轮换变成真实任务，进今日任务可标记完成
 - [ ] 待定：法定节假日跳过
+- [ ] 待定：微信/邮件主动推送提醒（现在只能被动打开页面看）
 
 ## 轮换规则说明
 
@@ -121,3 +131,17 @@
   - 级联：删任务同步清理其完成记录
   - 前端本地模式：无后端时兜底正常，成员/任务/轮换/删除/持久化全通过
 - **Commit**：feat: add server backend with shared data and passcode login / feat: add deploy scripts for server and nginx
+
+### 2026-10-14（五）— 我的任务视角 + 安全加固
+
+- **修改文件**：server.js、index.html、.gitignore，删除 deploy.sh / deploy.nginx.conf
+- **完成内容**：
+  - 新增「我的任务」页（默认首页）：选「我是谁」→ 只显示自己的今日任务 + 未来 7 天，未选人时提示休息
+  - 轮换新增「生成未来 60 天任务」按钮，把排班真正写成任务记录，进入今日任务可标记完成；按 name+date 去重，重复生成返回 0 不会翻倍
+  - 后端新增 `/api/rotate/generate` 接口，错误分支均有中文提示（无成员 / 排班不存在 / 源任务已删）
+  - **安全加固**：删掉 `PASSCODE` 默认弱口令 `dorm2026`，改为不设环境变量则拒绝启动（已验证退出码 1）
+- **测试结果**：
+  - 前端：生成 59 条（1 源 + 59 排班），重复生成不增加；选对人显示任务+完成按钮，选别人提示休息，标记后状态切「已完成」
+  - 后端：generated 59 → 重复 0 → 总数 60；无成员/不存在排班/源任务已删三种错误均正确返回
+  - 分配正确性：2 人轮换 10-14→张三、10-15→李四、10-16→张三、10-19（跳周末）→李四
+- **Commit**：fix: refuse to start without PASSCODE env var, drop unused VPS scripts / feat: add my-tasks view and generate rotation into real tasks
