@@ -106,6 +106,16 @@ th{color:#646a73;font-weight:500}
     <h2>完成历史</h2>
     <div id="hisList"></div>
   </div>
+  <div class="card">
+    <h2>数据备份</h2>
+    <div class="row">
+      <button class="ghost" onclick="exportData()">导出备份文件</button>
+      <button class="ghost" onclick="document.getElementById('importFile').click()">导入备份</button>
+      <input type="file" id="importFile" accept=".json" style="display:none" onchange="importData(this)">
+      <button class="del" onclick="resetData()">清空全部数据</button>
+    </div>
+    <p style="font-size:13px;color:#646a73;margin-top:8px">数据保存在本机浏览器，换设备或清缓存前请先导出备份。</p>
+  </div>
 </div>
 
 <script>
@@ -228,6 +238,34 @@ function renderHistory(){
    '<table><tr><th>日期</th><th>任务</th><th>负责人</th></tr>'+e.map(function(x){
     return '<tr><td>'+x.d+'</td><td>'+esc(x.n)+'</td><td>'+esc(x.o)+'</td></tr>';}).join('')+'</table>'
    :'<p style="color:#9aa0a6">还没有完成记录</p>';
+}
+
+// 备份
+function exportData(){
+  var blob=new Blob([JSON.stringify(db,null,2)],{type:'application/json'});
+  var a=document.createElement('a');
+  a.href=URL.createObjectURL(blob);
+  a.download='dorm-backup-'+todayStr()+'.json';
+  a.click();
+}
+function importData(input){
+  var f=input.files[0];if(!f)return;
+  var r=new FileReader();
+  r.onload=function(){
+    try{
+      var d=JSON.parse(r.result);
+      if(!d||!Array.isArray(d.members)||!Array.isArray(d.tasks))throw new Error('格式不对');
+      if(!confirm('导入将覆盖当前全部数据，确定继续？'))return;
+      db={members:d.members,tasks:d.tasks,rotates:d.rotates||[],done:d.done||{}};
+      save();renderAll();alert('导入成功');
+    }catch(e){alert('导入失败：文件格式不正确');}
+    input.value='';
+  };
+  r.readAsText(f);
+}
+function resetData(){
+  if(!confirm('确定清空全部成员、任务、排班和完成记录？此操作不可撤销。'))return;
+  db=init();save();renderAll();
 }
 
 // tabs
