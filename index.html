@@ -43,11 +43,27 @@ th{color:#646a73;font-weight:500}
 </div>
 
 <div class="tabs" id="tabs">
-  <button data-t="today" class="on">今日任务</button>
+  <button data-t="mine" class="on">我的任务</button>
+  <button data-t="today">今日任务</button>
   <button data-t="task">任务管理</button>
   <button data-t="rotate">轮换安排</button>
   <button data-t="member">成员管理</button>
   <button data-t="history">完成历史</button>
+</div>
+
+<!-- 我的任务 -->
+<div id="v-mine">
+  <div class="card today">
+    <div class="row" style="margin-bottom:10px">
+      <b style="font-size:15px">我是</b>
+      <select id="whoami" onchange="renderMine()" style="min-width:120px"></select>
+    </div>
+    <div id="mineToday"></div>
+  </div>
+  <div class="card">
+    <h2>我接下来 7 天</h2>
+    <div id="mineWeek"></div>
+  </div>
 </div>
 
 <p id="syncTip" style="font-size:13px;color:#646a73;margin-bottom:10px">本地模式：数据仅保存在本机浏览器。</p>
@@ -92,6 +108,10 @@ th{color:#646a73;font-weight:500}
       <button onclick="addRotate()">生成排班</button>
     </div>
     <p style="font-size:13px;color:#646a73;margin-top:8px">按成员顺序循环分配，从开始日期起每天一人；勾选跳过后周六日不排班、不占用轮换序号。</p>
+    <div class="row" style="margin-top:10px">
+      <button onclick="genAll()">生成未来 60 天任务</button>
+      <span style="font-size:13px;color:#646a73">生成后这些排班会进入「今日任务」，可标记完成</span>
+    </div>
   </div>
   <div class="card">
     <h2>排班表</h2>
@@ -265,19 +285,89 @@ function rotateList(r){
     var wd=d.getDay();
     if(r.skipWeekend&&(wd===0||wd===6))continue;
     if(n>=60)break;
-    out.push({date:s,name:t.name,member:mem[(n+idx)%mem.length].name});
+    var mm=mem[(n+idx)%mem.length];
+    out.push({date:s,name:t.name,member:mm.name,ownerId:mm.id});
     n++;
   }
   return out;
 }
 
+// 把全部排班写成任务
+function genAll(){
+  if(!db.members.length)return alert('请先到「成员管理」添加成员');
+  if(!db.rotates.length)return alert('请先创建一条排班规则');
+  var go=function(){
+    var n=0;
+    db.rotates.forEach(function(r){n+=genRotateTasks(r);});
+    return n;
+  };
+  if(MODE==='server'){
+    var rid=db.rotates.map(function(r){return r.id;});
+    Promise.all(rid.map(function(id){return api('/api/rotate/generate',{rotateId:id});}))
+      .then(function(rs){var t=rs.reduce(function(a,b){return a+(b.created||0);},0);refresh().then(function(){alert('已生成 '+t+' 条任务');});})
+      .catch(er);
+    return;
+  }
+  var n=go();
+  act(function(){});
+  alert(n?('已生成 '+n+' 条任务'):'所有日期都已生成过了，无需重复');
+}
+
+// 把排班真正写成任务，这样「今日任务」和完成记录才有内容
+// 已经生成过的日期不会重复生成
+function genRotateTasks(r){
+  var list=rotateList(r);
+  var made=0;
+  list.forEach(function(x){
+    var exist=db.tasks.filter(function(t){return t.name===x.name&&t.date===x.date;})[0];
+    if(!exist){db.tasks.push({id:Date.now()+made,name:x.name,date:x.date,owner:x.ownerId});made++;}
+  });
+  return made;
+}
+
 // 渲染
+function renderMine(){
+  var id=document.getElementById('whoami').value;
+  if(!id){
+    document.getElementById('mineToday').innerHTML=db.members.length?
+      '<p style="color:#9aa0a6">请选择你是谁</p>':
+      '<p style="color:#9aa0a6">还没有成员，请先到「成员管理」添加</p>';
+    document.getElementById('mineWeek').innerHTML='';
+    return;
+  }
+  var mid=Number(id);
+  var t=todayStr();
+  var today=db.tasks.filter(function(x){return x.date===t&&x.owner===mid;});
+  document.getElementById('mineToday').innerHTML=today.length?
+    today.map(function(x){
+      return '<div style="padding:8px 0;border-bottom:1px solid #f0f1f3">'+
+        '<span class="'+(isDone(x)?'done':'')+'">'+esc(x.name)+'</span> '+
+        '<span class="tag">'+(isDone(x)?'已完成':'待完成')+'</span> '+
+        '<button onclick="toggleDone('+x.id+')">'+(isDone(x)?'撤销':'完成')+'</button></div>';
+    }).join(''):
+    '<p style="color:#9aa0a6;padding:8px 0">今天没有分给你的活，休息一下</p>';
+
+  var w='';
+  for(var i=0;i<7;i++){
+    var d=new Date();d.setDate(d.getDate()+i);
+    var s=d.getFullYear()+'-'+p(d.getMonth()+1)+'-'+p(d.getDate());
+    var items=db.tasks.filter(function(x){return x.date===s&&x.owner===mid;});
+    w+='<div style="padding:6px 0;border-bottom:1px solid #f0f1f3"><b>'+(i===0?'今天':fmt(s))+'</b> '+
+      (items.length?items.map(function(x){return '<span class="'+(isDone(x)?'done':'')+'">'+esc(x.name)+'</span>';}).join('、'):'<span style="color:#9aa0a6">无</span>')+'</div>';
+  }
+  document.getElementById('mineWeek').innerHTML=w;
+}
+
 function renderAll(){
   var om='<option value="">未指定</option>'+db.members.map(function(m){return '<option value="'+m.id+'">'+esc(m.name)+'</option>'}).join('');
   document.getElementById('tOwner').innerHTML=om;
   document.getElementById('rTask').innerHTML=db.tasks.map(function(t){return '<option value="'+t.id+'">'+esc(t.name)+'（'+fmt(t.date)+'）</option>'}).join('');
+  var who=document.getElementById('whoami');
+  var keep=who.value;
+  who.innerHTML='<option value="">请选择</option>'+db.members.map(function(m){return '<option value="'+m.id+'">'+esc(m.name)+'</option>'}).join('');
+  who.value=keep;
   document.getElementById('todayTitle').textContent='今日任务 · '+todayStr();
-  renderToday();renderWeek();renderTasks();renderRotate();renderMember();renderHistory();
+  renderMine();renderToday();renderWeek();renderTasks();renderRotate();renderMember();renderHistory();
 }
 function esc(s){return String(s).replace(/[<>&]/g,'');}
 
@@ -370,7 +460,7 @@ document.querySelectorAll('#tabs button').forEach(function(b){
   b.onclick=function(){
     document.querySelectorAll('#tabs button').forEach(function(x){x.classList.remove('on');});
     b.classList.add('on');
-    ['today','task','rotate','member','history'].forEach(function(t){
+    ['mine','today','task','rotate','member','history'].forEach(function(t){
       document.getElementById('v-'+t).classList.toggle('hide',t!==b.dataset.t);});
   };
 });

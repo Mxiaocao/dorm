@@ -5,11 +5,18 @@ var fs = require('fs');
 var path = require('path');
 
 var PORT = process.env.PORT || 8080;
-var PASSCODE = process.env.PASSCODE || 'dorm2026';
+// 口令只从环境变量读，不设默认值 —— 没配就拒绝启动，避免带着弱口令上线
+var PASSCODE = process.env.PASSCODE || '';
 // 数据目录：本地默认项目根目录，容器部署时用 DATA_DIR 指向挂载的 Volume
 var DATA_DIR = process.env.DATA_DIR || __dirname;
 var DATA_FILE = path.join(DATA_DIR, 'data.json');
 var HTML_FILE = path.join(__dirname, 'index.html');
+
+if (!PASSCODE) {
+  console.error('未设置 PASSCODE 环境变量，拒绝启动。');
+  console.error('本地运行示例：PASSCODE=你的口令 node server.js');
+  process.exit(1);
+}
 
 // ---------- 数据读写（原子写 + 单进程串行，避免并发覆盖） ----------
 var queue = Promise.resolve();
@@ -57,6 +64,8 @@ function send(res, code, body, type) {
   });
   res.end(typeof body === 'string' ? body : JSON.stringify(body));
 }
+
+function pad(n) { return n < 10 ? '0' + n : '' + n; }
 
 function readBody(req) {
   return new Promise(function (resolve) {
@@ -155,6 +164,36 @@ var api = {
       db.rotates.push(r);
       return r;
     }).then(function (r) { send(res, 200, r); })
+      .catch(function (e) { send(res, 400, { error: e.message }); });
+  },
+
+  // POST /api/rotate/generate {rotateId}  把排班写成真实任务
+  'POST /api/rotate/generate': function (req, res, body) {
+    var rid = Number(body.rotateId);
+    mutate(function (db) {
+      var r = db.rotates.filter(function (x) { return x.id === rid; })[0];
+      if (!r) throw new Error('排班规则不存在');
+      var src = db.tasks.filter(function (x) { return x.id === r.taskId; })[0];
+      if (!src) throw new Error('源任务已被删除');
+      if (!db.members.length) throw new Error('请先添加成员');
+
+      var out = [], n = 0;
+      for (var i = 0; i < 120 && n < 60; i++) {
+        var d = new Date(r.start + 'T00:00:00');
+        d.setDate(d.getDate() + i);
+        var s = d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate());
+        var wd = d.getDay();
+        if (r.skipWeekend && (wd === 0 || wd === 6)) continue;
+        var mm = db.members[(n + db.rotates.indexOf(r)) % db.members.length];
+        out.push({ id: Date.now() + n * 7 + Math.floor(Math.random() * 6), name: src.name, date: s, owner: mm.id });
+        n++;
+      }
+      var have = {};
+      db.tasks.forEach(function (t) { have[t.name + '|' + t.date] = 1; });
+      var made = out.filter(function (t) { return !have[t.name + '|' + t.date]; });
+      db.tasks = db.tasks.concat(made);
+      return made.length;
+    }).then(function (n) { send(res, 200, { created: n }); })
       .catch(function (e) { send(res, 400, { error: e.message }); });
   },
 
