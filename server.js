@@ -6,7 +6,9 @@ var path = require('path');
 
 var PORT = process.env.PORT || 8080;
 var PASSCODE = process.env.PASSCODE || 'dorm2026';
-var DATA_FILE = path.join(__dirname, 'data.json');
+// 数据目录：本地默认项目根目录，容器部署时用 DATA_DIR 指向挂载的 Volume
+var DATA_DIR = process.env.DATA_DIR || __dirname;
+var DATA_FILE = path.join(DATA_DIR, 'data.json');
 var HTML_FILE = path.join(__dirname, 'index.html');
 
 // ---------- 数据读写（原子写 + 单进程串行，避免并发覆盖） ----------
@@ -207,6 +209,8 @@ var server = http.createServer(function (req, res) {
 });
 
 server.listen(PORT, '0.0.0.0', function () {
+  // 首次启动时确保数据目录存在，否则写文件会失败
+  try { if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true }); } catch (e) {}
   console.log('寝室卫生服务已启动: http://0.0.0.0:' + PORT);
-  console.log('数据文件: ' + DATA_FILE);
+  console.log('数据目录: ' + DATA_DIR);
 });

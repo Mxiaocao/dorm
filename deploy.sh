@@ -10,7 +10,7 @@
 
 set -e
 APP_DIR=/var/www/dorm
-PORT=8099
+PORT=8080
 PASSCODE="${PASSCODE:-请改成你自己的口令}"
 
 echo "==> 1/3 检查 Node.js"

@@ -1,0 +1,13 @@
+{
+  "name": "dorm-hygiene",
+  "version": "1.0.0",
+  "description": "寝室卫生安排与提醒程序",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "private": true
+}
