@@ -75,9 +75,10 @@ th{color:#646a73;font-weight:500}
     <div class="row">
       <select id="rTask"></select>
       <input type="date" id="rStart">
+      <label style="font-size:14px"><input type="checkbox" id="rSkip" style="width:auto;margin-right:4px">跳过周末</label>
       <button onclick="addRotate()">生成排班</button>
     </div>
-    <p style="font-size:13px;color:#646a73;margin-top:8px">按成员顺序循环分配，从开始日期起每天一人。</p>
+    <p style="font-size:13px;color:#646a73;margin-top:8px">按成员顺序循环分配，从开始日期起每天一人；勾选跳过后周六日不排班、不占用轮换序号。</p>
   </div>
   <div class="card">
     <h2>排班表</h2>
@@ -159,18 +160,25 @@ function mname(id){var m=db.members.filter(function(x){return x.id===id;})[0];re
 function addRotate(){
   var tid=Number(document.getElementById('rTask').value);
   var start=document.getElementById('rStart').value;
+  var skip=document.getElementById('rSkip').checked;
   if(!tid||!start)return alert('请选择任务和开始日期');
-  db.rotates.push({id:Date.now(),taskId:tid,start:start});save();renderAll();
+  db.rotates.push({id:Date.now(),taskId:tid,start:start,skipWeekend:skip});save();renderAll();
 }
 function rotateList(r){
   var out=[],mem=db.members;
   if(!mem.length)return out;
-  for(var i=0;i<60;i++){
+  var t=db.tasks.filter(function(x){return x.id===r.taskId;})[0];
+  if(!t)return out;
+  var idx=db.rotates.indexOf(r);
+  var n=0;
+  for(var i=0;i<120;i++){
     var d=new Date(r.start);d.setDate(d.getDate()+i);
     var s=d.getFullYear()+'-'+p(d.getMonth()+1)+'-'+p(d.getDate());
-    var t=db.tasks.filter(function(x){return x.id===r.taskId;})[0];if(!t)break;
-    var same=db.tasks.filter(function(x){return x.name===t.name&&x.date===s;})[0];
-    out.push({date:s,name:t.name,member:mem[(i+db.rotates.indexOf(r))%mem.length].name,same:same});
+    var wd=d.getDay();
+    if(r.skipWeekend&&(wd===0||wd===6))continue;
+    if(n>=60)break;
+    out.push({date:s,name:t.name,member:mem[(n+idx)%mem.length].name});
+    n++;
   }
   return out;
 }
