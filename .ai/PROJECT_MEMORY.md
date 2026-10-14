@@ -37,16 +37,18 @@
 ## 当前开发状态
 
 - [x] Step 1：项目初始化 + 记忆文档
-- [ ] Step 2：成员管理
-- [ ] Step 3：卫生任务管理
-- [ ] Step 4：轮换安排
-- [ ] Step 5：完成状态与历史
-- [ ] Step 6：今日提醒视图
+- [x] Step 2~6：MVP 全部模块（成员 / 任务 / 轮换 / 完成状态 / 今日提醒）已一次性实现
+- [ ] 待定：数据导出备份、部署为在线链接
 
 ## 后续开发记录
 
 ### 2026-10-14
 
 - **完成内容**：初始化项目，创建 .ai/PROJECT_MEMORY.md，git init，搭建 index.html 应用骨架（成员管理 / 任务管理 / 轮换 / 历史 / 今日提醒 五个模块）
-- **测试结果**：浏览器打开 index.html 正常，各模块可交互
+- **测试结果**：Node 环境 mock DOM 跑通全部核心逻辑（轮换 A→B→C→D 循环、完成/撤销、增删、持久化）；修掉两个 bug（renderWeek 未定义、轮换起始偏移错位）
 - **Commit**：docs: initialize project memory / feat: add mvp core modules
+
+### 已知限制
+
+- 数据存 localStorage，换浏览器/清缓存会丢，未做导出备份
+- 轮换一次生成 60 天预排，未处理节假日跳过
