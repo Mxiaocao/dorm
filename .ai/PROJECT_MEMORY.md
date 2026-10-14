@@ -145,3 +145,13 @@
   - 后端：generated 59 → 重复 0 → 总数 60；无成员/不存在排班/源任务已删三种错误均正确返回
   - 分配正确性：2 人轮换 10-14→张三、10-15→李四、10-16→张三、10-19（跳周末）→李四
 - **Commit**：fix: refuse to start without PASSCODE env var, drop unused VPS scripts / feat: add my-tasks view and generate rotation into real tasks
+### 2026-10-14（六）— 上线 Zeabur + 修复登录遮罩
+
+**线上地址**：https://dorm-413.zeabur.app （项目 dorm，服务 dorm，Volume `data` → `/data`）
+
+- **Zeabur 配置**：Variables 设 `PASSCODE`（自定义口令）+ `PORT=${ZEABUR_PORT}`；Networking 点 Generate Domain 拿免费子域
+- **踩坑记录**：Zeabur 用 GitHub App 授权，只能看到安装时勾选的仓库。后建的 `dorm` 不在列表，需去 github.com/settings/installations 给 Zeabur App 加权限
+- **踩坑记录（重要 bug）**：`.hide{display:none}` 优先级低于内联 `style="display:flex"`，导致**登录遮罩登录成功后永远不消失**，表现为「口令正确但进不去」。修复：`.hide{display:none!important}`。教训：给元素设内联 display 布局后，不能靠普通 class 切换显隐
+- **同时加固**：doLogin 改为「验证口令 → 直接拉数据 → 成功才隐藏遮罩」，任何失败都 alert 明确原因，不再静默退回本地模式（原逻辑若 initUI 抛错会被 catch 吞掉，页面看着正常却连着本地数据）；按钮加 loading 态与防重复点击；口令框支持回车提交
+- **测试**：真实 DOM mock + 本地 HTTP 服务端到端验证 —— 错误口令被拒且遮罩保留、正确口令 MODE 切 server、遮罩移除、同步提示切换、备份卡隐藏、按钮状态恢复。线上确认修复已部署
+- **Commit**：edc71ec fix: login overlay never hides due to inline display beating .hide class
